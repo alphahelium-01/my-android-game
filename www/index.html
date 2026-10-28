@@ -1,49 +1,704 @@
-name: Build Android APK
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Neon Parkour Runner</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #090d16;
+      touch-action: none;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
 
-on:
-  push:
-    branches: [ "main", "master" ]
-  workflow_dispatch:
+    /* HUD Overlay */
+    #hud {
+      position: absolute;
+      top: 16px;
+      left: 20px;
+      right: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+      color: #f8fafc;
+      font-weight: 800;
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+    }
+    .hud-box {
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 16px;
+      letter-spacing: 0.5px;
+    }
+    #progressContainer {
+      width: 160px;
+      height: 12px;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid #475569;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    #progressBar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #38bdf8, #10b981);
+      transition: width 0.1s linear;
+    }
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+    /* Banner Notification */
+    #banner {
+      position: absolute;
+      top: 35%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #ffffff;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+    #banner h1 {
+      font-size: 38px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #38bdf8;
+      text-shadow: 0 0 15px rgba(56, 189, 248, 0.7);
+    }
+    #banner p {
+      font-size: 18px;
+      color: #cbd5e1;
+      margin-top: 6px;
+    }
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    /* Multi-Touch Controls */
+    .controls {
+      position: absolute;
+      bottom: 24px;
+      left: 24px;
+      right: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      pointer-events: none;
+    }
+    .left-controls, .right-controls {
+      display: flex;
+      gap: 14px;
+      pointer-events: auto;
+    }
+    .ctrl-btn {
+      width: 72px;
+      height: 72px;
+      border-radius: 18px;
+      background: rgba(30, 41, 59, 0.65);
+      border: 2px solid rgba(148, 163, 184, 0.4);
+      color: #f8fafc;
+      font-size: 24px;
+      font-weight: bold;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      outline: none;
+      backdrop-filter: blur(4px);
+    }
+    .ctrl-btn.active {
+      background: rgba(56, 189, 248, 0.45);
+      border-color: #38bdf8;
+      transform: scale(0.95);
+    }
+    .btn-dash {
+      background: rgba(245, 158, 11, 0.25);
+      border-color: rgba(245, 158, 11, 0.6);
+      font-size: 15px;
+      letter-spacing: 1px;
+    }
+    .btn-dash.active {
+      background: rgba(245, 158, 11, 0.6);
+      border-color: #fbbf24;
+    }
+    .btn-jump {
+      width: 82px;
+      height: 82px;
+      border-radius: 50%;
+      background: rgba(16, 185, 129, 0.3);
+      border-color: rgba(16, 185, 129, 0.7);
+      font-size: 16px;
+    }
+    .btn-jump.active {
+      background: rgba(16, 185, 129, 0.65);
+      border-color: #34d399;
+    }
+  </style>
+</head>
+<body>
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+  <canvas id="gameCanvas"></canvas>
 
-      - name: Set up Java JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: 17
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hud-box" id="levelText">LEVEL 1</div>
+    <div id="progressContainer"><div id="progressBar"></div></div>
+    <div class="hud-box" id="deathText">FALLS: 0</div>
+  </div>
 
-      - name: Install dependencies & add Android platform
-        run: |
-          npm install
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
-          npx cap sync android
+  <!-- Stage Notification Banner -->
+  <div id="banner">
+    <h1 id="bannerTitle">LEVEL 1</h1>
+    <p id="bannerSub">Reach the Neon Portal</p>
+  </div>
 
-      - name: Lock screen to Landscape Mode
-        run: |
-          sed -i 's/<activity/<activity android:screenOrientation="sensorLandscape"/g' android/app/src/main/AndroidManifest.xml
+  <!-- Mobile Controls -->
+  <div class="controls">
+    <div class="left-controls">
+      <div class="ctrl-btn" id="btnLeft">◀</div>
+      <div class="ctrl-btn" id="btnRight">▶</div>
+    </div>
+    <div class="right-controls">
+      <div class="ctrl-btn btn-dash" id="btnDash">DASH</div>
+      <div class="ctrl-btn btn-jump" id="btnJump">JUMP</div>
+    </div>
+  </div>
 
-      - name: Build Debug APK with Gradle
-        working-directory: ./android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Game State
+    let currentLevel = 1;
+    let deaths = 0;
+    let levelLength = 2000;
+    let camera = { x: 0, y: 0 };
+    let particles = [];
+    let trail = [];
+
+    // Player Physics & Parkour State
+    const player = {
+      x: 80,
+      y: 200,
+      w: 28,
+      h: 40,
+      vx: 0,
+      vy: 0,
+      speed: 340,
+      jumpForce: -560,
+      gravity: 1500,
+      grounded: false,
+      jumpsLeft: 2,
+      wallSliding: false,
+      wallDir: 0, // -1 left wall, 1 right wall
+      dashing: false,
+      dashTimer: 0,
+      dashCooldown: 0,
+      facing: 1,
+      invincibleTimer: 0
+    };
+
+    // World Objects
+    let platforms = [];
+    let spikes = [];
+    let bouncePads = [];
+    let drones = [];
+    let goal = { x: 0, y: 0, w: 50, h: 80 };
+
+    // Input Handling
+    const input = { left: false, right: false };
+
+    function setupButton(id, onDown, onUp) {
+      const btn = document.getElementById(id);
+      const start = (e) => {
+        e.preventDefault();
+        btn.classList.add('active');
+        onDown();
+      };
+      const end = (e) => {
+        e.preventDefault();
+        btn.classList.remove('active');
+        if (onUp) onUp();
+      };
+      btn.addEventListener('touchstart', start, { passive: false });
+      btn.addEventListener('touchend', end, { passive: false });
+      btn.addEventListener('touchcancel', end, { passive: false });
+      btn.addEventListener('mousedown', start);
+      btn.addEventListener('mouseup', end);
+      btn.addEventListener('mouseleave', end);
+    }
+
+    setupButton('btnLeft', () => { input.left = true; }, () => { input.left = false; });
+    setupButton('btnRight', () => { input.right = true; }, () => { input.right = false; });
+    setupButton('btnJump', () => triggerJump());
+    setupButton('btnDash', () => triggerDash());
+
+    // Keyboard Support for Testing
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
+      if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') triggerJump();
+      if (e.key === 'Shift' || e.key === 'k') triggerDash();
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
+      if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
+    });
+
+    function showBanner(title, subtitle) {
+      const banner = document.getElementById('banner');
+      document.getElementById('bannerTitle').innerText = title;
+      document.getElementById('bannerSub').innerText = subtitle;
+      banner.style.opacity = '1';
+      setTimeout(() => { banner.style.opacity = '0'; }, 1800);
+    }
+
+    // Parkour Actions
+    function triggerJump() {
+      // Wall Jump
+      if (player.wallSliding) {
+        player.vy = player.jumpForce * 0.95;
+        player.vx = -player.wallDir * (player.speed * 1.35);
+        player.facing = -player.wallDir;
+        player.wallSliding = false;
+        player.jumpsLeft = 1;
+        spawnParticles(player.x + player.w / 2, player.y + player.h / 2, '#38bdf8', 12);
+        return;
+      }
+      // Ground or Double Jump
+      if (player.jumpsLeft > 0) {
+        player.vy = player.jumpForce;
+        player.grounded = false;
+        player.jumpsLeft--;
+        const color = player.jumpsLeft === 1 ? '#f8fafc' : '#34d399';
+        spawnParticles(player.x + player.w / 2, player.y + player.h, color, 10);
+      }
+    }
+
+    function triggerDash() {
+      if (player.dashCooldown <= 0 && !player.dashing) {
+        player.dashing = true;
+        player.dashTimer = 0.18;
+        player.dashCooldown = 0.75;
+        player.vy = 0;
+        player.vx = player.facing * 820;
+        spawnParticles(player.x + player.w / 2, player.y + player.h / 2, '#fbbf24', 15);
+      }
+    }
+
+    function spawnParticles(x, y, color, count) {
+      for (let i = 0; i < count; i++) {
+        particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 260,
+          vy: (Math.random() - 0.5) * 260,
+          size: 3 + Math.random() * 4,
+          color,
+          life: 0.35 + Math.random() * 0.25
+        });
+      }
+    }
+
+    // Procedural Level Generator with Increasing Difficulty
+    function generateLevel(lvl) {
+      platforms = [];
+      spikes = [];
+      bouncePads = [];
+      drones = [];
+      particles = [];
+      trail = [];
+
+      // Starting Safe Platform
+      let curX = 0;
+      let curY = 350;
+      platforms.push({ x: curX, y: curY, w: 260, h: 40, type: 'normal' });
+      curX += 260;
+
+      // Difficulty scaling parameters
+      const segments = 7 + lvl * 3;
+      const gapBase = Math.min(95 + lvl * 10, 190);
+      const hazardChance = Math.min(0.25 + lvl * 0.08, 0.75);
+      const droneChance = lvl >= 2 ? Math.min(0.2 + (lvl - 2) * 0.1, 0.65) : 0;
+
+      for (let i = 0; i < segments; i++) {
+        const pattern = Math.random();
+        const gap = gapBase + Math.random() * 65;
+        curX += gap;
+
+        if (pattern < 0.25 && i > 0) {
+          // Parkour Wall-Jump Tower
+          const wallHeight = 220 + Math.min(lvl * 15, 120);
+          platforms.push({ x: curX, y: curY - wallHeight, w: 36, h: wallHeight + 40, type: 'wall' });
+          platforms.push({ x: curX + 145, y: curY - wallHeight + 40, w: 36, h: wallHeight, type: 'wall' });
+          
+          curY = curY - wallHeight + 40;
+          curX += 181;
+          platforms.push({ x: curX, y: curY, w: 180, h: 32, type: 'normal' });
+          curX += 180;
+
+        } else if (pattern < 0.48) {
+          // Bounce Pad High Vault
+          platforms.push({ x: curX, y: curY, w: 150, h: 32, type: 'normal' });
+          bouncePads.push({ x: curX + 55, y: curY - 12, w: 40, h: 12 });
+          curX += 150 + gap * 1.3;
+          curY -= 160;
+          platforms.push({ x: curX, y: curY, w: 200, h: 32, type: 'normal' });
+          curX += 200;
+
+        } else {
+          // Standard Parkour Run + Obstacles
+          const platW = Math.max(150, 280 - lvl * 12) + Math.random() * 90;
+          curY += (Math.random() - 0.5) * 110;
+          platforms.push({ x: curX, y: curY, w: platW, h: 32, type: 'normal' });
+
+          // Add Spike Traps
+          if (platW > 190 && Math.random() < hazardChance) {
+            const spikeW = 36;
+            const spikeX = curX + platW * 0.5 - spikeW * 0.5;
+            spikes.push({ x: spikeX, y: curY - 18, w: spikeW, h: 18 });
+          }
+
+          // Add Moving Patrol Drones on higher levels
+          if (Math.random() < droneChance) {
+            drones.push({
+              x: curX + platW / 2,
+              y: curY - 55,
+              startX: curX + 20,
+              endX: curX + platW - 20,
+              r: 14,
+              speed: 110 + lvl * 22,
+              dir: 1
+            });
+          }
+
+          curX += platW;
+        }
+      }
+
+      // Final Goal Platform
+      curX += 110;
+      platforms.push({ x: curX, y: curY, w: 240, h: 40, type: 'goal' });
+      goal = { x: curX + 140, y: curY - 80, w: 48, h: 80 };
+      levelLength = goal.x;
+
+      respawnPlayer();
+      document.getElementById('levelText').innerText = `LEVEL ${currentLevel}`;
+      showBanner(`LEVEL ${currentLevel}`, `Difficulty Tier ${currentLevel} — Parkour Course`);
+    }
+
+    function respawnPlayer() {
+      player.x = 60;
+      player.y = 260;
+      player.vx = 0;
+      player.vy = 0;
+      player.dashing = false;
+      player.jumpsLeft = 2;
+    }
+
+    // AABB Collision Helper
+    function rectIntersect(ax, ay, aw, ah, bx, by, bw, bh) {
+      return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+    }
+
+    // Main Update Loop
+    function update(dt) {
+      if (player.dashCooldown > 0) player.dashCooldown -= dt;
+
+      // Handle Dash State
+      if (player.dashing) {
+        player.dashTimer -= dt;
+        trail.push({ x: player.x, y: player.y, alpha: 0.7, color: '#fbbf24' });
+        if (player.dashTimer <= 0) {
+          player.dashing = false;
+          player.vx *= 0.4;
+        }
+      } else {
+        // Horizontal Movement
+        let targetVx = 0;
+        if (input.left) { targetVx = -player.speed; player.facing = -1; }
+        if (input.right) { targetVx = player.speed; player.facing = 1; }
+
+        // Smooth acceleration in air vs ground
+        const accel = player.grounded ? 18 : 10;
+        player.vx += (targetVx - player.vx) * accel * dt;
+
+        // Gravity
+        player.vy += player.gravity * dt;
+        if (player.vy > 1100) player.vy = 1100;
+      }
+
+      // Move X & Resolve Collisions
+      player.x += player.vx * dt;
+      player.wallSliding = false;
+      player.wallDir = 0;
+
+      for (const p of platforms) {
+        if (rectIntersect(player.x, player.y, player.w, player.h, p.x, p.y, p.w, p.h)) {
+          if (player.vx > 0) {
+            player.x = p.x - player.w;
+            if (!player.grounded && input.right && player.vy > 0) {
+              player.wallSliding = true;
+              player.wallDir = 1;
+            }
+          } else if (player.vx < 0) {
+            player.x = p.x + p.w;
+            if (!player.grounded && input.left && player.vy > 0) {
+              player.wallSliding = true;
+              player.wallDir = -1;
+            }
+          }
+          player.vx = 0;
+        }
+      }
+
+      // Apply Wall Slide Friction
+      if (player.wallSliding) {
+        player.vy = Math.min(player.vy, 140);
+        if (Math.random() < 0.35) {
+          const wx = player.wallDir === 1 ? player.x + player.w : player.x;
+          spawnParticles(wx, player.y + player.h / 2, '#94a3b8', 1);
+        }
+      }
+
+      // Move Y & Resolve Collisions
+      player.y += player.vy * dt;
+      player.grounded = false;
+
+      for (const p of platforms) {
+        if (rectIntersect(player.x, player.y, player.w, player.h, p.x, p.y, p.w, p.h)) {
+          if (player.vy > 0) {
+            player.y = p.y - player.h;
+            player.vy = 0;
+            player.grounded = true;
+            player.jumpsLeft = 2;
+          } else if (player.vy < 0) {
+            player.y = p.y + p.h;
+            player.vy = 0;
+          }
+        }
+      }
+
+      // Bounce Pads Check
+      for (const bp of bouncePads) {
+        if (rectIntersect(player.x, player.y, player.w, player.h, bp.x, bp.y, bp.w, bp.h)) {
+          player.vy = player.jumpForce * 1.45;
+          player.grounded = false;
+          player.jumpsLeft = 2;
+          spawnParticles(bp.x + bp.w / 2, bp.y, '#10b981', 18);
+        }
+      }
+
+      // Spike Hazards Check
+      for (const s of spikes) {
+        if (rectIntersect(player.x + 4, player.y + 4, player.w - 8, player.h - 8, s.x, s.y, s.w, s.h)) {
+          handleDeath();
+          return;
+        }
+      }
+
+      // Update & Check Patrol Drones
+      for (const d of drones) {
+        d.x += d.speed * d.dir * dt;
+        if (d.x > d.endX) { d.x = d.endX; d.dir = -1; }
+        if (d.x < d.startX) { d.x = d.startX; d.dir = 1; }
+
+        const dx = (player.x + player.w / 2) - d.x;
+        const dy = (player.y + player.h / 2) - d.y;
+        if (Math.hypot(dx, dy) < d.r + 14) {
+          handleDeath();
+          return;
+        }
+      }
+
+      // Check Fall Out of World
+      const lowestPlat = Math.max(...platforms.map(p => p.y)) + 600;
+      if (player.y > lowestPlat) {
+        handleDeath();
+        return;
+      }
+
+      // Check Level Goal Portal
+      if (rectIntersect(player.x, player.y, player.w, player.h, goal.x, goal.y, goal.w, goal.h)) {
+        currentLevel++;
+        generateLevel(currentLevel);
+        return;
+      }
+
+      // Update Trail & Particles
+      if (Math.abs(player.vx) > 220 || Math.abs(player.vy) > 350) {
+        trail.push({ x: player.x, y: player.y, alpha: 0.3, color: '#38bdf8' });
+      }
+      for (let i = trail.length - 1; i >= 0; i--) {
+        trail[i].alpha -= dt * 2.2;
+        if (trail[i].alpha <= 0) trail.splice(i, 1);
+      }
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const pt = particles[i];
+        pt.x += pt.vx * dt;
+        pt.y += pt.vy * dt;
+        pt.life -= dt;
+        if (pt.life <= 0) particles.splice(i, 1);
+      }
+
+      // Smooth Camera Tracking
+      const targetCamX = player.x - canvas.width * 0.32;
+      const targetCamY = player.y - canvas.height * 0.55;
+      camera.x += (targetCamX - camera.x) * 8 * dt;
+      camera.y += (targetCamY - camera.y) * 6 * dt;
+
+      // Update Progress Bar
+      const pct = Math.max(0, Math.min(100, (player.x / levelLength) * 100));
+      document.getElementById('progressBar').style.width = `${pct}%`;
+    }
+
+    function handleDeath() {
+      deaths++;
+      document.getElementById('deathText').innerText = `FALLS: ${deaths}`;
+      spawnParticles(player.x + player.w / 2, player.y + player.h / 2, '#f43f5e', 24);
+      respawnPlayer();
+    }
+
+    // Render Game World
+    function draw() {
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Parallax Cyber Grid
+      ctx.strokeStyle = '#111a2e';
+      ctx.lineWidth = 1;
+      const gridSize = 60;
+      const offX = (-camera.x * 0.4) % gridSize;
+      const offY = (-camera.y * 0.4) % gridSize;
+
+      for (let x = offX; x < canvas.width; x += gridSize) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      }
+      for (let y = offY; y < canvas.height; y += gridSize) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+
+      ctx.save();
+      ctx.translate(-camera.x, -camera.y);
+
+      // Draw Platforms
+      for (const p of platforms) {
+        ctx.fillStyle = p.type === 'wall' ? '#1e293b' : '#0f172a';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+
+        ctx.strokeStyle = p.type === 'wall' ? '#38bdf8' : '#334155';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(p.x, p.y, p.w, p.h);
+
+        // Top Neon Edge Highlight
+        ctx.fillStyle = p.type === 'goal' ? '#10b981' : '#38bdf8';
+        ctx.fillRect(p.x, p.y, p.w, 4);
+      }
+
+      // Draw Bounce Pads
+      for (const bp of bouncePads) {
+        ctx.fillStyle = '#10b981';
+        ctx.fillRect(bp.x, bp.y, bp.w, bp.h);
+        ctx.shadowColor = '#10b981';
+        ctx.shadowBlur = 10;
+        ctx.fillRect(bp.x + 4, bp.y - 3, bp.w - 8, 3);
+        ctx.shadowBlur = 0;
+      }
+
+      // Draw Spikes
+      ctx.fillStyle = '#f43f5e';
+      for (const s of spikes) {
+        const count = 3;
+        const sw = s.w / count;
+        for (let i = 0; i < count; i++) {
+          ctx.beginPath();
+          ctx.moveTo(s.x + i * sw, s.y + s.h);
+          ctx.lineTo(s.x + i * sw + sw / 2, s.y);
+          ctx.lineTo(s.x + (i + 1) * sw, s.y + s.h);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      // Draw Patrol Drones
+      for (const d of drones) {
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+        ctx.fillStyle = '#f43f5e';
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#fda4af';
+        ctx.stroke();
+      }
+
+      // Draw Goal Portal
+      ctx.save();
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(goal.x, goal.y, goal.w, goal.h);
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
+      ctx.fillRect(goal.x, goal.y, goal.w, goal.h);
+      ctx.restore();
+
+      // Draw Parkour Afterimage Trail
+      for (const t of trail) {
+        ctx.fillStyle = t.color;
+        ctx.globalAlpha = Math.max(0, t.alpha);
+        ctx.fillRect(t.x, t.y, player.w, player.h);
+      }
+      ctx.globalAlpha = 1;
+
+      // Draw Player Runner
+      ctx.fillStyle = player.dashing ? '#fbbf24' : '#38bdf8';
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+
+      // Player Cyber Visor / Headband
+      ctx.fillStyle = '#090d16';
+      const eyeX = player.facing === 1 ? player.x + 14 : player.x + 2;
+      ctx.fillRect(eyeX, player.y + 8, 12, 6);
+
+      // Draw Particles
+      for (const pt of particles) {
+        ctx.fillStyle = pt.color;
+        ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
+      }
+
+      ctx.restore();
+    }
+
+    // Initialize & Start Game Loop
+    generateLevel(currentLevel);
+    let lastTime = performance.now();
+
+    function gameLoop(now) {
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+      update(dt);
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
