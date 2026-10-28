@@ -1,1 +1,6 @@
-
+{
+  "appId": "com.parkour.neonrunner",
+  "appName": "Neon Parkour",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
