@@ -1,1 +1,11 @@
 
+{
+  "name": "neon-parkour-game",
+  "version": "1.0.0",
+  "description": "2D Android Parkour Game",
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/cli": "^6.0.0",
+    "@capacitor/core": "^6.0.0"
+  }
+}
